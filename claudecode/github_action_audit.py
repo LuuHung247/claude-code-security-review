@@ -72,6 +72,8 @@ class GitHubActionClient:
         # Get PR metadata
         pr_url = f"https://api.github.com/repos/{repo_name}/pulls/{pr_number}"
         response = requests.get(pr_url, headers=self.headers)
+        if not response.ok:
+            print(f"[Debug] PR fetch status: {response.status_code}, body: {response.text[:500]}", file=sys.stderr)
         response.raise_for_status()
         pr_data = response.json()
         
