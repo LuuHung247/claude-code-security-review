@@ -47,9 +47,10 @@ class GitHubActionClient:
             raise ValueError("GITHUB_TOKEN environment variable required")
             
         self.headers = {
-            'Authorization': f'Bearer {self.github_token}',
-            'Accept': 'application/vnd.github.v3+json',
-            'X-GitHub-Api-Version': '2022-11-28'
+            'Authorization': f'token {self.github_token}',
+            'Accept': 'application/vnd.github+json',
+            'X-GitHub-Api-Version': '2022-11-28',
+            'User-Agent': 'claude-code-security-review/1.0'
         }
         
         # Get excluded directories from environment
