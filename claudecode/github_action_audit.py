@@ -9,10 +9,11 @@ import sys
 import json
 import subprocess
 import requests
+from github import Github
 from typing import Dict, Any, List, Tuple, Optional
 from pathlib import Path
 import re
-import time 
+import time
 
 # Import existing components we can reuse
 from claudecode.prompts import get_security_audit_prompt
@@ -51,50 +52,44 @@ class GitHubActionClient:
             'Accept': 'application/vnd.github.v3+json',
             'User-Agent': 'python-requests/2.28.0'
         }
-        
+        self.gh = Github(self.github_token)
+
         # Get excluded directories from environment
         exclude_dirs = os.environ.get('EXCLUDE_DIRECTORIES', '')
         self.excluded_dirs = [d.strip() for d in exclude_dirs.split(',') if d.strip()] if exclude_dirs else []
         if self.excluded_dirs:
             print(f"[Debug] Excluded directories: {self.excluded_dirs}", file=sys.stderr)
-    
+
     def get_pr_data(self, repo_name: str, pr_number: int) -> Dict[str, Any]:
         """Get PR metadata and files from GitHub API.
-        
+
         Args:
             repo_name: Repository name in format "owner/repo"
             pr_number: Pull request number
-            
+
         Returns:
             Dictionary containing PR data
         """
-        # Get PR metadata
-        pr_url = f"https://api.github.com/repos/{repo_name}/pulls/{pr_number}"
-        response = requests.get(pr_url, headers=self.headers)
-        if not response.ok:
-            print(f"[Debug] PR fetch status: {response.status_code}, body: {response.text[:500]}", file=sys.stderr)
-        response.raise_for_status()
-        pr_data = response.json()
-        
-        # Get PR files with pagination support
-        files_url = f"https://api.github.com/repos/{repo_name}/pulls/{pr_number}/files?per_page=100"
-        response = requests.get(files_url, headers=self.headers)
-        response.raise_for_status()
-        files_data = response.json()
-        
+        # Use PyGithub which handles auth more robustly
+        repo = self.gh.get_repo(repo_name)
+        pr = repo.get_pull(pr_number)
+        files_data = [{'filename': f.filename, 'status': f.status, 'additions': f.additions,
+                       'deletions': f.deletions, 'changes': f.changes, 'patch': f.patch or ''}
+                      for f in pr.get_files()]
+
         return {
-            'number': pr_data['number'],
-            'title': pr_data['title'],
-            'body': pr_data.get('body', ''),
-            'user': pr_data['user']['login'],
-            'created_at': pr_data['created_at'],
-            'updated_at': pr_data['updated_at'],
-            'state': pr_data['state'],
+            'number': pr.number,
+            'title': pr.title,
+            'body': pr.body or '',
+            'user': pr.user.login,
+            'created_at': pr.created_at.isoformat(),
+            'updated_at': pr.updated_at.isoformat(),
+            'state': pr.state,
             'head': {
-                'ref': pr_data['head']['ref'],
-                'sha': pr_data['head']['sha'],
+                'ref': pr.head.ref,
+                'sha': pr.head.sha,
                 'repo': {
-                    'full_name': pr_data['head']['repo']['full_name'] if pr_data['head']['repo'] else repo_name
+                    'full_name': pr.head.repo.full_name if pr.head.repo else repo_name
                 }
             },
             'base': {
@@ -102,20 +97,12 @@ class GitHubActionClient:
                 'sha': pr_data['base']['sha']
             },
             'files': [
-                {
-                    'filename': f['filename'],
-                    'status': f['status'],
-                    'additions': f['additions'],
-                    'deletions': f['deletions'],
-                    'changes': f['changes'],
-                    'patch': f.get('patch', '')
-                }
-                for f in files_data
+                f for f in files_data
                 if not self._is_excluded(f['filename'])
             ],
-            'additions': pr_data['additions'],
-            'deletions': pr_data['deletions'],
-            'changed_files': pr_data['changed_files']
+            'additions': pr.additions,
+            'deletions': pr.deletions,
+            'changed_files': pr.changed_files
         }
     
     def get_pr_diff(self, repo_name: str, pr_number: int) -> str:
@@ -131,11 +118,19 @@ class GitHubActionClient:
         url = f"https://api.github.com/repos/{repo_name}/pulls/{pr_number}"
         headers = dict(self.headers)
         headers['Accept'] = 'application/vnd.github.diff'
-        
+
         response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        
-        return self._filter_generated_files(response.text)
+        if response.ok:
+            return self._filter_generated_files(response.text)
+
+        # Fallback: build diff from file patches via PyGithub
+        repo = self.gh.get_repo(repo_name)
+        pr = repo.get_pull(pr_number)
+        diff_parts = []
+        for f in pr.get_files():
+            if f.patch:
+                diff_parts.append(f"diff --git a/{f.filename} b/{f.filename}\n{f.patch}")
+        return self._filter_generated_files('\n'.join(diff_parts))
     
     def _is_excluded(self, filepath: str) -> bool:
         """Check if a file should be excluded based on directory patterns."""
