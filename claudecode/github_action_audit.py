@@ -48,9 +48,8 @@ class GitHubActionClient:
             
         self.headers = {
             'Authorization': f'token {self.github_token}',
-            'Accept': 'application/vnd.github+json',
-            'X-GitHub-Api-Version': '2022-11-28',
-            'User-Agent': 'claude-code-security-review/1.0'
+            'Accept': 'application/vnd.github.v3+json',
+            'User-Agent': 'python-requests/2.28.0'
         }
         
         # Get excluded directories from environment
