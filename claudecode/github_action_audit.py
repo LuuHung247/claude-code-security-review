@@ -93,8 +93,8 @@ class GitHubActionClient:
                 }
             },
             'base': {
-                'ref': pr_data['base']['ref'],
-                'sha': pr_data['base']['sha']
+                'ref': pr.base.ref,
+                'sha': pr.base.sha
             },
             'files': [
                 f for f in files_data
